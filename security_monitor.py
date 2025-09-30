@@ -109,8 +109,8 @@ def get_nvd_vulnerabilities():
     
     return vulnerabilities
 
-def send_email(vulnerabilities):
-    """Email gönder"""
+def send_daily_report(vulnerabilities):
+    """Her gün rapor gönder - açık olsun olmasın"""
     sender = os.environ.get('EMAIL_SENDER')
     password = os.environ.get('EMAIL_PASSWORD')
     receiver = os.environ.get('EMAIL_RECEIVER')
@@ -122,7 +122,31 @@ def send_email(vulnerabilities):
     
     # Email içeriği
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = f'🔒 Güvenlik Bildirimi - {len(vulnerabilities)} Yeni Açık Bulundu'
+    
+    if len(vulnerabilities) > 0:
+        msg['Subject'] = f'🔒 Güvenlik Bildirimi - {len(vulnerabilities)} Yeni Açık Bulundu'
+        summary = f'<p><strong>{len(vulnerabilities)} yeni güvenlik açığı tespit edildi.</strong></p>'
+        vuln_section = ''
+        for vuln in vulnerabilities:
+            severity_class = vuln['severity'].lower() if vuln['severity'] != 'N/A' else 'low'
+            vuln_section += f"""
+                <div class="vulnerability {severity_class}">
+                    <div>
+                        <span class="tech">{vuln['technology']}</span>
+                        <span class="severity severity-{severity_class}">{vuln['severity']}</span>
+                    </div>
+                    <h3>{vuln['title']}</h3>
+                    <p><strong>CVE:</strong> {vuln['cve']}</p>
+                    <p><strong>Kaynak:</strong> {vuln['source']}</p>
+                    <p><strong>Yayın Tarihi:</strong> {vuln['published'][:10]}</p>
+                    <p><a href="{vuln['url']}" target="_blank">Detaylı Bilgi →</a></p>
+                </div>
+            """
+    else:
+        msg['Subject'] = '✅ Güvenlik Raporu - Bugün Açık Bulunamadı'
+        summary = '<p><strong>✅ Bugün yeni güvenlik açığı bulunamadı.</strong></p><p>İzlenen teknolojiler: NPM, Prisma, Azure, PostgreSQL, MSSQL, Elasticsearch, N8N, OpenAI, Anthropic</p>'
+        vuln_section = ''
+    
     msg['From'] = sender
     msg['To'] = receiver
     
@@ -132,7 +156,7 @@ def send_email(vulnerabilities):
     <head>
         <style>
             body {{ font-family: Arial, sans-serif; }}
-            .header {{ background-color: #d32f2f; color: white; padding: 20px; }}
+            .header {{ background-color: {'#d32f2f' if len(vulnerabilities) > 0 else '#4caf50'}; color: white; padding: 20px; }}
             .vulnerability {{ 
                 border: 1px solid #ddd; 
                 margin: 10px 0; 
@@ -168,34 +192,17 @@ def send_email(vulnerabilities):
     </head>
     <body>
         <div class="header">
-            <h2>🔒 Günlük Güvenlik Raporu</h2>
+            <h2>{'🔒 Günlük Güvenlik Raporu' if len(vulnerabilities) > 0 else '✅ Günlük Güvenlik Raporu'}</h2>
             <p>{datetime.now().strftime('%d.%m.%Y %H:%M')}</p>
         </div>
         <div style="padding: 20px;">
-            <p><strong>{len(vulnerabilities)} yeni güvenlik açığı tespit edildi.</strong></p>
-    """
-    
-    for vuln in vulnerabilities:
-        severity_class = vuln['severity'].lower() if vuln['severity'] != 'N/A' else 'low'
-        html_content += f"""
-            <div class="vulnerability {severity_class}">
-                <div>
-                    <span class="tech">{vuln['technology']}</span>
-                    <span class="severity severity-{severity_class}">{vuln['severity']}</span>
-                </div>
-                <h3>{vuln['title']}</h3>
-                <p><strong>CVE:</strong> {vuln['cve']}</p>
-                <p><strong>Kaynak:</strong> {vuln['source']}</p>
-                <p><strong>Yayın Tarihi:</strong> {vuln['published'][:10]}</p>
-                <p><a href="{vuln['url']}" target="_blank">Detaylı Bilgi →</a></p>
-            </div>
-        """
-    
-    html_content += """
+            {summary}
+            {vuln_section}
         </div>
         <div style="padding: 20px; background-color: #f5f5f5; margin-top: 20px;">
             <p style="font-size: 12px; color: #666;">
-                Bu rapor GitHub Actions tarafından otomatik olarak oluşturulmuştur.
+                Bu rapor GitHub Actions tarafından otomatik olarak oluşturulmuştur.<br>
+                Her gün saat 09:00'da (Türkiye saati) kontrol yapılır.
             </p>
         </div>
     </body>
@@ -210,7 +217,10 @@ def send_email(vulnerabilities):
             server.starttls()
             server.login(sender, password)
             server.send_message(msg)
-        print(f"✅ Email başarıyla gönderildi: {len(vulnerabilities)} açık")
+        if len(vulnerabilities) > 0:
+            print(f"✅ Email başarıyla gönderildi: {len(vulnerabilities)} açık")
+        else:
+            print(f"✅ Email başarıyla gönderildi: Bugün açık bulunamadı")
         return True
     except Exception as e:
         print(f"❌ Email gönderme hatası: {e}")
@@ -235,11 +245,9 @@ def main():
     # Sonuçları göster
     print(f"\n📊 Toplam {len(all_vulnerabilities)} güvenlik açığı bulundu")
     
-    if all_vulnerabilities:
-        print("\n📧 Email gönderiliyor...")
-        send_email(all_vulnerabilities)
-    else:
-        print("\n✅ Yeni güvenlik açığı bulunamadı")
+    # Her durumda email gönder
+    print("\n📧 Email gönderiliyor...")
+    send_daily_report(all_vulnerabilities)
     
     # Sonuçları dosyaya kaydet (opsiyonel - loglama için)
     with open('last_check.json', 'w', encoding='utf-8') as f:
